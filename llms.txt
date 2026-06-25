@@ -1,0 +1,68 @@
+# pheno-forge-smoke
+
+> End-to-end smoke test for the 4-PR forgecode improvement stack (ADR-096).
+
+## What it does
+
+Loads `libpheno_bridge.dylib` (C-ABI shared lib from `pheno-cdylib-bridge`) and exercises the 4-scope memory facade end-to-end:
+
+1. `bridge_load` — `pheno_bridge_version()` returns expected semver
+2. `sidecar_health` (live-sidecar mode) — probes `:3030`, `:8283`, `:8000`
+3. `scope_episodic` — store + recall + forget through `CompositeAdapter(scope=Episodic)`
+4. `scope_identity` — same, `scope=Identity`
+5. `scope_project_knowledge` — same, `scope=ProjectKnowledge`
+6. `scope_fallback` — same, `scope=Fallback`
+7. `composite_construct` — `CompositeAdapter` opens + closes cleanly
+
+## Quickstart
+
+```bash
+# Build
+cd ../pheno-cdylib-bridge && cargo build --release
+cd ../pheno-forge-smoke && cargo build --release
+
+# Run (mock mode, no sidecars required)
+./target/release/pheno-forge-smoke
+
+# Run (live sidecar mode)
+./scripts/run-smoke.sh sidecar
+```
+
+## Modes
+
+| Mode | What | Use case |
+|---|---|---|
+| `--mode=mock` *(default)* | Bridge loads; route calls expected to fail | CI dry-runs |
+| `--mode=sidecar` | Sidecars probed; route calls must succeed | Pre-flight |
+| `--mode=c` | Compile-only parity with C smoke | Test rig parity |
+
+## Output
+
+- Human-readable: colored checkmarks + summary
+- `--jsonl`: one line per check + a final summary line
+
+## Stack it tests
+
+```
+user -> pheno-forge-plugins (6 systemd sidecars)
+     -> pheno-cdylib-bridge (8 C-ABI symbols)
+     -> thegent-memory v2 (MemoryPort + CompositeAdapter)
+     -> forge_pheno_memory (upstream forgecode workspace crate)
+```
+
+## Companion repos
+
+- `KooshaPari/pheno-forge-plugins` — sidecar bundle (v0.1.0)
+- `KooshaPari/pheno-cdylib-bridge` — C-ABI shared lib (v0.1.0)
+- `KooshaPari/thegent#1144` — memory v2 polyglot facade
+- `tailcallhq/forgecode#3559` — forge_pheno_memory workspace crate
+
+## ADR refs
+
+- **ADR-096**: forgecode improvement (this smoke's parent)
+- **ADR-097**: eval harness (consumes this smoke)
+- **ADR-098**: additional adapters (uses this smoke as regression baseline)
+
+## License
+
+Apache-2.0 OR MIT

@@ -1,0 +1,26 @@
+# Build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo.lock for binaries
+# (keep Cargo.lock for libraries; this is a CLI, so commit it)
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local
+*.log
+*.tmp
+.env
+.env.local
+
+# Sidecar binaries (Tier 2 per ADR-027; fetched at install time, never committed)
+/bin/*-sidecar

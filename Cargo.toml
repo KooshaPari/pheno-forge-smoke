@@ -1,0 +1,43 @@
+[package]
+name = "pheno-forge-smoke"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "End-to-end smoke test for the 4-PR forgecode improvement stack (ADR-096)"
+repository = "https://github.com/KooshaPari/pheno-forge-smoke"
+keywords = ["forgecode", "memory", "smoke-test", "phenotype", "cdylib"]
+categories = ["command-line-utilities", "development-tools::testing"]
+
+[lib]
+name = "pheno_forge_smoke"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pheno-forge-smoke"
+path = "src/main.rs"
+
+[dependencies]
+# The bridge is loaded at RUNTIME via libloading — no Rust dep on
+# pheno-cdylib-bridge is needed for this binary to link. The .dylib
+# must be present at runtime (see scripts/run-smoke.sh and
+# default_bridge_path() in src/lib.rs).
+tokio = { version = "1.49", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4.5", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+colored = "2.1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+libloading = "0.8"
+
+[dev-dependencies]
+tokio = { version = "1.49", features = ["full", "test-util"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
