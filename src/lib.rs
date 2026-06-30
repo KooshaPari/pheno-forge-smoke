@@ -9,9 +9,10 @@
 //! All calls ultimately route through the loaded cdylib, so the smoke
 //! binary never has a hard link dependency on `libpheno_bridge`.
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use libloading::Library;
 use std::ffi::{CStr, CString};
+use std::fmt;
 use std::os::raw::{c_char, c_int, c_void};
 
 #[repr(C)]
@@ -72,7 +73,172 @@ pub struct MemoryHandle(pub *mut c_void);
 unsafe impl Send for MemoryHandle {}
 unsafe impl Sync for MemoryHandle {}
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_provider_label() {
+        assert_eq!(Provider::Supermemory.label(), "sm");
+        assert_eq!(Provider::Letta.label(), "letta");
+        assert_eq!(Provider::Cognee.label(), "cognee");
+        assert_eq!(Provider::Mem0.label(), "mem0");
+        assert_eq!(Provider::Composite.label(), "composite");
+    }
+
+    #[test]
+    fn test_scope_label() {
+        assert_eq!(Scope::Episodic.label(), "episodic");
+        assert_eq!(Scope::Identity.label(), "identity");
+        assert_eq!(Scope::ProjectKnowledge.label(), "project_knowledge");
+        assert_eq!(Scope::Fallback.label(), "fallback");
+    }
+
+    #[test]
+    fn test_memory_value_text() {
+        let v = MemoryValue::Text("hello".into());
+        if let MemoryValue::Text(s) = &v {
+            assert_eq!(s, "hello");
+        } else {
+            panic!("expected Text variant");
+        }
+    }
+
+    #[test]
+    fn test_memory_value_binary() {
+        let v = MemoryValue::Binary(vec![1, 2, 3]);
+        if let MemoryValue::Binary(b) = &v {
+            assert_eq!(b, &[1, 2, 3]);
+        } else {
+            panic!("expected Binary variant");
+        }
+    }
+
+    #[test]
+    fn test_memory_value_json() {
+        let v = MemoryValue::Json("{\"a\":1}".into());
+        if let MemoryValue::Json(j) = &v {
+            assert_eq!(j, "{\"a\":1}");
+        } else {
+            panic!("expected Json variant");
+        }
+    }
+
+    #[test]
+    #[ignore = "requires actual libpheno_bridge on the system"]
+    fn test_bridge_load_nonexistent() {
+        let result = Bridge::load("/nonexistent/libpheno_bridge.so");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        let msg = format!("{:#}", err);
+        assert!(msg.contains("nonexistent"), "error should mention path: {msg}");
+    }
+
+    #[test]
+    fn test_default_bridge_path_env_override() {
+        let saved = std::env::var("PHENO_BRIDGE_PATH").ok();
+        std::env::set_var("PHENO_BRIDGE_PATH", "/tmp/custom_bridge.so");
+        let p = default_bridge_path();
+        assert_eq!(p, std::path::PathBuf::from("/tmp/custom_bridge.so"));
+        // Restore
+        if let Some(v) = saved {
+            std::env::set_var("PHENO_BRIDGE_PATH", v);
+        } else {
+            std::env::remove_var("PHENO_BRIDGE_PATH");
+        }
+    }
+
+    #[test]
+    fn test_default_bridge_path_no_env() {
+        let saved = std::env::var("PHENO_BRIDGE_PATH").ok();
+        std::env::remove_var("PHENO_BRIDGE_PATH");
+        let p = default_bridge_path();
+        // When no env var and no system path exists, falls back to exe-relative.
+        let _parent = p.parent().expect("bridge path should have a parent");
+        let fname = p.file_name().expect("bridge path should have a file name");
+        assert!(
+            fname == "libpheno_bridge.dylib" || fname == "libpheno_bridge.so",
+            "expected bridge library basename, got {fname:?}"
+        );
+        // Restore
+        if let Some(v) = saved {
+            std::env::set_var("PHENO_BRIDGE_PATH", v);
+        }
+    }
+
+    #[test]
+    fn test_smoke_error_display_bridge_load() {
+        let err = SmokeError::BridgeLoad {
+            path: "/bad/path.so".into(),
+            cause: "dlopen failed".into(),
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("/bad/path.so"));
+        assert!(msg.contains("dlopen failed"));
+    }
+
+    #[test]
+    fn test_smoke_error_display_symbol() {
+        let err = SmokeError::SymbolNotFound {
+            name: "pheno_foo".into(),
+            cause: "symbol not in scope".into(),
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("pheno_foo"));
+    }
+
+    #[test]
+    fn test_smoke_error_is_std_error() {
+        let err = SmokeError::NullPointer {
+            context: "version call".into(),
+        };
+        let std_err: &dyn std::error::Error = &err;
+        let msg = format!("{}", std_err);
+        assert!(msg.contains("version call"));
+    }
+}
+
+/// Typed error for bridge operations and library loading.
+#[derive(Debug, Clone)]
+pub enum SmokeError {
+    /// Bridge shared library could not be loaded.
+    BridgeLoad { path: String, cause: String },
+    /// Required C-ABI symbol not found in the loaded library.
+    SymbolNotFound { name: String, cause: String },
+    /// A bridge call (store/recall/forget) returned a non-zero status.
+    BridgeOp { op: String, detail: String },
+    /// A string contained an interior null byte and could not be passed as C string.
+    CStringConversion { field: String, cause: String },
+    /// Bridge returned a null pointer where a valid pointer was expected.
+    NullPointer { context: String },
+}
+
+impl fmt::Display for SmokeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SmokeError::BridgeLoad { path, cause } => {
+                write!(f, "failed to load bridge from {path}: {cause}")
+            }
+            SmokeError::SymbolNotFound { name, cause } => {
+                write!(f, "symbol `{name}` not found: {cause}")
+            }
+            SmokeError::BridgeOp { op, detail } => {
+                write!(f, "bridge operation `{op}` failed: {detail}")
+            }
+            SmokeError::CStringConversion { field, cause } => {
+                write!(f, "C string conversion for `{field}` failed: {cause}")
+            }
+            SmokeError::NullPointer { context } => {
+                write!(f, "unexpected null pointer: {context}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SmokeError {}
+
 /// Loaded bridge — owns the `Library` and typed function pointers.
+#[derive(Debug)]
 pub struct Bridge {
     _lib: Library,
     f_version: unsafe extern "C" fn() -> *const c_char,
@@ -94,14 +260,21 @@ impl Bridge {
     pub fn load(path: &str) -> Result<Self> {
         // SAFETY: the library is a valid cdylib; symbols are looked up once at load.
         unsafe {
-            let lib = Library::new(path)
-                .map_err(|e| anyhow!("failed to load {}: {}", path, e))?;
+            let lib = Library::new(path).with_context(|| {
+                anyhow!(SmokeError::BridgeLoad {
+                    path: path.to_owned(),
+                    cause: "unable to dlopen".into(),
+                })
+            })?;
 
             macro_rules! sym {
                 ($name:literal, $ty:ty) => {{
                     let s = std::ffi::CString::new($name).unwrap();
                     *lib.get::<$ty>(s.as_bytes())
-                        .map_err(|e| anyhow!("symbol {}: {}", $name, e))?
+                        .map_err(|e| anyhow!(SmokeError::SymbolNotFound {
+                            name: $name.to_owned(),
+                            cause: e.to_string(),
+                        }))?
                 }};
             }
 
