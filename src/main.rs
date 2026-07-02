@@ -29,6 +29,7 @@ use clap::Parser;
 use colored::*;
 use pheno_forge_smoke::{default_bridge_path, Bridge, MemoryValue, Provider, Scope};
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
 
@@ -86,6 +87,60 @@ struct SmokeReport {
     overall_pass: bool,
 }
 
+/// Whether the terminal should use ANSI color output.
+fn use_color() -> bool {
+    static NO_COLOR: OnceLock<bool> = OnceLock::new();
+    *NO_COLOR.get_or_init(|| {
+        let val = std::env::var("NO_COLOR").unwrap_or_default();
+        val.is_empty() && atty::is(atty::Stream::Stdout)
+    })
+}
+
+/// Apply bold if color is enabled.
+fn maybe_bold(s: &str) -> ColoredString {
+    if use_color() {
+        s.bold()
+    } else {
+        s.normal()
+    }
+}
+
+/// Apply green color if enabled.
+fn maybe_green(s: &str) -> ColoredString {
+    if use_color() {
+        s.green()
+    } else {
+        s.normal()
+    }
+}
+
+/// Apply red color if enabled.
+fn maybe_red(s: &str) -> ColoredString {
+    if use_color() {
+        s.red()
+    } else {
+        s.normal()
+    }
+}
+
+/// Apply dim style if color is enabled.
+fn maybe_dim(s: &str) -> ColoredString {
+    if use_color() {
+        s.dimmed()
+    } else {
+        s.normal()
+    }
+}
+
+/// Apply cyan color if enabled.
+fn maybe_cyan(s: &str) -> ColoredString {
+    if use_color() {
+        s.cyan()
+    } else {
+        s.normal()
+    }
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -101,9 +156,9 @@ async fn main() -> Result<()> {
     if !args.jsonl {
         println!(
             "{} {} {}",
-            "pheno-forge-smoke".bold().cyan(),
-            env!("CARGO_PKG_VERSION").dimmed(),
-            format!("(mode: {:?})", args.mode).dimmed()
+            maybe_cyan("pheno-forge-smoke").bold(),
+            maybe_dim(env!("CARGO_PKG_VERSION")),
+            maybe_dim(&format!("(mode: {:?})", args.mode))
         );
         println!();
     }
@@ -360,15 +415,15 @@ async fn finalize(
         }
         println!("{}", serde_json::to_string(&report)?);
     } else {
-        println!("{}", "Results:".bold());
+        println!("{}", maybe_bold("Results:"));
         for check in &checks {
             let mark = if check.passed {
-                "OK  ".green().bold()
+                maybe_green("OK  ").bold()
             } else {
-                "FAIL".red().bold()
+                maybe_red("FAIL").bold()
             };
             let detail = if check.passed {
-                check.detail.dimmed()
+                maybe_dim(&check.detail)
             } else {
                 check.detail.normal()
             };
@@ -378,27 +433,22 @@ async fn finalize(
             );
         }
         println!();
-        let summary = if overall_pass {
-            format!("ALL {} CHECKS PASSED", checks.len())
-                .green()
-                .bold()
+        let summary: ColoredString = if overall_pass {
+            maybe_green(&format!("ALL {} CHECKS PASSED", checks.len())).bold()
         } else {
             let failed = checks.iter().filter(|c| !c.passed).count();
-            format!("{} / {} CHECKS FAILED", failed, checks.len())
-                .red()
-                .bold()
+            maybe_red(&format!("{} / {} CHECKS FAILED", failed, checks.len())).bold()
         };
         println!("{}", summary);
         println!(
             "{}",
-            format!(
+            maybe_dim(&format!(
                 "Bridge: {} ({})  Mode: {:?}  Duration: {} ms",
                 report.bridge_version,
                 report.bridge_path,
                 args.mode,
                 (finished - started).num_milliseconds()
-            )
-            .dimmed()
+            ))
         );
     }
 

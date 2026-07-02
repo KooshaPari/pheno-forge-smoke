@@ -32,6 +32,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 colored = "2.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 libloading = "0.8"
+atty = "0.2"
 
 [dev-dependencies]
 tokio = { version = "1.49", features = ["full", "test-util"] }
